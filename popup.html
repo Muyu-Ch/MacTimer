@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MacTimer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <h1 class="brand">
+      <img class="brand-icon" src="icons/icon48.png" alt="" width="20" height="20">
+      <span>MacTimer</span>
+    </h1>
+    <span class="privacy-chip">本地保存</span>
+  </header>
+
+  <nav class="date-nav" aria-label="选择日期">
+    <button class="nav-btn" id="prev" type="button" aria-label="前一天">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9.75 3.5 5.25 8l4.5 4.5"/>
+      </svg>
+    </button>
+    <div class="date-center">
+      <span class="date-label" id="dateLabel"></span>
+      <span class="rel-tag" id="relTag" hidden>今天</span>
+    </div>
+    <button class="nav-btn" id="next" type="button" aria-label="后一天">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.25 3.5 10.75 8l-4.5 4.5"/>
+      </svg>
+    </button>
+  </nav>
+
+  <section class="summary" aria-label="当日总计">
+    <div class="summary-line">
+      <span class="summary-label">总计</span>
+      <span class="summary-meta" id="siteCount">暂无记录</span>
+    </div>
+    <div class="total-value" id="totalValue">0 秒</div>
+  </section>
+
+  <section class="sites" aria-label="网站停留明细">
+    <ul class="site-list" id="siteList"></ul>
+    <div class="empty" id="empty" hidden>
+      <div class="empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="12" cy="12" r="8.25"/>
+          <path d="M12 7.5V12l3.1 2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <p class="empty-title" id="emptyTitle">今天还没有停留记录</p>
+      <p class="empty-copy" id="emptyCopy">切换到任意网页后会自动开始计时。</p>
+    </div>
+  </section>
+
+  <section class="week-card" aria-label="最近七天每日停留时间">
+    <div class="week-head">
+      <span>最近 7 天停留</span>
+      <span class="week-range" id="weekRange"></span>
+    </div>
+    <div class="week-chart">
+      <div class="week-baseline" aria-hidden="true"></div>
+      <div class="week-bars" id="weekBars"></div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span class="footer-note">
+      <span class="footer-dot" aria-hidden="true"></span>
+      每分钟记录 · 仅存本机
+    </span>
+    <button class="sync-btn" id="syncNow" type="button" title="将当前数据立即同步到 Mac App">
+      同步到 Mac
+    </button>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
