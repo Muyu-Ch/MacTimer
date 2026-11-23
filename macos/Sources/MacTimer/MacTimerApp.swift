@@ -1,8 +1,13 @@
 import AppKit
 import SwiftUI
+import MacTimerCore
 import MacTimerUI
 
 final class MacTimerAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppearanceMode.applyStored()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {
@@ -15,7 +20,10 @@ struct MacTimerApp: App {
     @NSApplicationDelegateAdaptor(MacTimerAppDelegate.self)
     private var appDelegate
 
-    @StateObject private var model = DashboardModel()
+    @StateObject private var model = DashboardModel(
+        dayStartHour: DayStartSetting.load()
+    )
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup("MacTimer") {
@@ -31,13 +39,26 @@ struct MacTimerApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command])
             }
+
+            CommandGroup(replacing: .appInfo) {
+                Button("关于 MacTimer") {
+                    openWindow(id: "about")
+                }
+            }
         }
 
         Settings {
             MacTimerSettingsView(
                 model: model,
-                store: MappingStore.shared
+                store: MappingStore.shared,
+                categoryStore: model.categoryStore
             )
         }
+
+        Window("关于 MacTimer", id: "about") {
+            MacTimerAboutView()
+        }
+        .defaultSize(width: 680, height: 760)
+        .windowResizability(.contentSize)
     }
 }

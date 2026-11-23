@@ -50,6 +50,20 @@ public enum AppPaths {
         try? fileManager.copyItem(at: legacy, to: url)
     }
 
+    /// App-owned history of Screen Time data. Apple's detail database only
+    /// keeps about four weeks, so successful reads are merged here and kept
+    /// beyond that window.
+    public static var screenTimeArchiveURL: URL {
+        if let path = ProcessInfo.processInfo.environment[
+            "MACTIMER_SCREEN_TIME_ARCHIVE"
+        ], !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return defaultSupportDirectory.appendingPathComponent(
+            "screen-time-archive.json"
+        )
+    }
+
     /// The private database behind Apple Screen Time. Reading it requires
     /// Full Disk Access; `MACTIMER_KNOWLEDGE_DB` overrides it for tests.
     public static var screenTimeDatabaseURL: URL {

@@ -735,6 +735,218 @@ final class MacTimerCoreTests: XCTestCase {
         }
     }
 
+    func testScreenTimeArchiveRoundTripAndMerger() throws {
+        let day = "2026-11-23"
+        let olderDay = "2026-10-30"
+        let days: [String: [String: Int64]] = [
+            olderDay: ["com.example.old": 10 * 60_000],
+            day: ["com.example.a": 20 * 60_000],
+        ]
+        let hours: [String: [Int: [String: Int64]]] = [
+            olderDay: [9: ["com.example.old": 10 * 60_000]],
+            day: [10: ["com.example.a": 20 * 60_000]],
+        ]
+        let archive = ScreenTimeArchive(
+            days: days,
+            hoursByHour: hours,
+            stream: "/app/usage",
+            updatedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        XCTAssertEqual(archive.hourBuckets(), hours)
+        XCTAssertEqual(archive.usage().days, days)
+
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = ScreenTimeArchiveStore(
+            fileURL: folder.appendingPathComponent("archive.json")
+        )
+        try store.save(archive)
+        XCTAssertEqual(try store.load(), archive)
+
+        var mergedDays = days
+        var mergedHours = hours
+        let usage = ScreenTimeUsage(
+            days: [
+                day: [
+                    "com.example.a": 30 * 60_000,
+                    "com.example.b": 5 * 60_000,
+                ],
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_800_000_100),
+            stream: "/app/usage",
+            eventCount: 2,
+            hours: [
+                day: [
+                    10: ["com.example.a": 30 * 60_000],
+                    11: ["com.example.b": 5 * 60_000],
+                ],
+            ]
+        )
+        ScreenTimeArchiveMerger.merge(
+            days: &mergedDays,
+            hours: &mergedHours,
+            with: usage
+        )
+
+        XCTAssertEqual(
+            mergedDays[olderDay]?["com.example.old"],
+            10 * 60_000
+        )
+        XCTAssertEqual(mergedDays[day]?["com.example.a"], 30 * 60_000)
+        XCTAssertEqual(mergedDays[day]?["com.example.b"], 5 * 60_000)
+        XCTAssertEqual(
+            mergedHours[day]?[10]?["com.example.a"],
+            30 * 60_000
+        )
+        XCTAssertEqual(
+            mergedHours[day]?[11]?["com.example.b"],
+            5 * 60_000
+        )
+    }
+
+    func testCalendarDayTodayRespectsStartHour() throws {
+        let calendar = utcCalendar()
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 11
+        components.day = 24
+        components.hour = 2
+        let earlyMorning = try XCTUnwrap(
+            calendar.date(from: components)
+        )
+        components.hour = 4
+        let boundary = try XCTUnwrap(calendar.date(from: components))
+
+        XCTAssertEqual(
+            CalendarDay.today(
+                earlyMorning,
+                startHour: 0,
+                calendar: calendar
+            ),
+            "2026-11-24"
+        )
+        XCTAssertEqual(
+            CalendarDay.today(
+                earlyMorning,
+                startHour: 4,
+                calendar: calendar
+            ),
+            "2026-11-23"
+        )
+        XCTAssertEqual(
+            CalendarDay.today(
+                boundary,
+                startHour: 4,
+                calendar: calendar
+            ),
+            "2026-11-24"
+        )
+    }
+
+    func testDayBucketingMovesEarlyHoursToPreviousDay() {
+        let hour: Int64 = 60 * 60_000
+        let days: [String: [String: Int64]] = [
+            "2026-11-23": ["a": 10 * hour, "b": hour],
+            "2026-11-24": ["a": 2 * hour],
+        ]
+        let early: [String: [Int: [String: Int64]]] = [
+            "2026-11-23": [
+                0: ["a": hour],
+                1: ["a": hour],
+            ],
+            "2026-11-24": [
+                0: ["a": 30 * 60_000],
+                2: ["b": 15 * 60_000],
+            ],
+        ]
+
+        let shifted = DayBucketing.shiftedDays(
+            days: days,
+            earlyHourBuckets: early,
+            startHour: 4
+        )
+        XCTAssertEqual(shifted["2026-11-23"]?["a"], 8 * hour + 30 * 60_000)
+        XCTAssertEqual(shifted["2026-11-23"]?["b"], hour + 15 * 60_000)
+        XCTAssertEqual(shifted["2026-11-24"]?["a"], hour + 30 * 60_000)
+        XCTAssertNil(shifted["2026-11-24"]?["b"])
+        XCTAssertEqual(
+            DayBucketing.shiftedDays(
+                days: days,
+                earlyHourBuckets: early,
+                startHour: 0
+            ),
+            days
+        )
+    }
+
+    func testDayBucketingMovesHourBucketsToPreviousDay() {
+        let hour: Int64 = 60 * 60_000
+        let hours: [String: [Int: [String: Int64]]] = [
+            "2026-11-23": [23: ["a": hour]],
+            "2026-11-24": [
+                0: ["a": 2 * hour],
+                1: ["b": hour],
+                4: ["a": 3 * hour],
+            ],
+        ]
+
+        let shifted = DayBucketing.shiftedHours(
+            hours: hours,
+            startHour: 4
+        )
+        XCTAssertEqual(shifted["2026-11-23"]?[23]?["a"], hour)
+        XCTAssertEqual(shifted["2026-11-23"]?[0]?["a"], 2 * hour)
+        XCTAssertEqual(shifted["2026-11-23"]?[1]?["b"], hour)
+        XCTAssertEqual(shifted["2026-11-24"]?[4]?["a"], 3 * hour)
+        XCTAssertNil(shifted["2026-11-24"]?[0])
+    }
+
+    func testUsageMergerMergesAndResetsEarlyHours() {
+        let day = "2026-11-23"
+        let next = "2026-11-24"
+        let first = UsageMerger.merge(
+            existing: nil,
+            payload: NativeSyncPayload(
+                type: "sync",
+                reset: true,
+                days: [day: ["a": 60_000]],
+                earlyHours: [
+                    day: ["0": ["a": 10_000]],
+                    next: ["1": ["b": 20_000]],
+                ]
+            ),
+            receivedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        XCTAssertEqual(first.earlyHours?[day]?["0"]?["a"], 10_000)
+        XCTAssertEqual(first.earlyHours?[next]?["1"]?["b"], 20_000)
+
+        let delta = UsageMerger.merge(
+            existing: first,
+            payload: NativeSyncPayload(
+                type: "sync",
+                reset: false,
+                days: [day: ["a": 120_000]],
+                earlyHours: [day: ["0": ["a": 30_000]]]
+            ),
+            receivedAt: Date(timeIntervalSince1970: 1_800_000_100)
+        )
+        XCTAssertEqual(delta.earlyHours?[day]?["0"]?["a"], 30_000)
+        XCTAssertEqual(delta.earlyHours?[next]?["1"]?["b"], 20_000)
+
+        let reset = UsageMerger.merge(
+            existing: delta,
+            payload: NativeSyncPayload(
+                type: "sync",
+                reset: true,
+                days: [day: ["a": 60_000]]
+            ),
+            receivedAt: Date(timeIntervalSince1970: 1_800_000_200)
+        )
+        XCTAssertNil(reset.earlyHours)
+    }
+
     private func makeKnowledgeDB(
         events: [(String, String, Date, Date)]
     ) throws -> URL {

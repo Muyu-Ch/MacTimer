@@ -112,6 +112,7 @@ public enum ScreenTimeAccessState: Equatable, Sendable {
 public enum DayChartMode: String, CaseIterable, Identifiable, Sendable {
     case hourly
     case items
+    case category
 
     public var id: String { rawValue }
 
@@ -119,20 +120,62 @@ public enum DayChartMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .hourly: "按小时"
         case .items: "按网站/App"
+        case .category: "按分类"
         }
     }
 }
 
 public struct DayHourBar: Identifiable, Equatable, Sendable {
+    /// Actual local clock hour (0...23).
     public var hour: Int
+    /// Position within the logical day; the x-axis index.
+    public var axisIndex: Int
     public var milliseconds: Int64
 
-    public var id: Int { hour }
+    public var id: Int { axisIndex }
     public var hours: Double { Double(milliseconds) / 3_600_000 }
 
-    public init(hour: Int, milliseconds: Int64) {
+    public init(
+        hour: Int,
+        milliseconds: Int64,
+        axisIndex: Int? = nil
+    ) {
         self.hour = hour
+        self.axisIndex = axisIndex ?? hour
         self.milliseconds = milliseconds
+    }
+}
+
+public struct DayHourCategorySlice: Identifiable, Equatable, Sendable {
+    /// Actual local clock hour (0...23).
+    public var hour: Int
+    /// Position within the logical day; the x-axis index.
+    public var axisIndex: Int
+    public var categoryID: String
+    public var categoryName: String
+    public var colorHex: String
+    public var milliseconds: Int64
+    public var isUncategorized: Bool
+
+    public var id: String { "\(axisIndex)-\(categoryID)" }
+    public var hours: Double { Double(milliseconds) / 3_600_000 }
+
+    public init(
+        hour: Int,
+        axisIndex: Int,
+        categoryID: String,
+        categoryName: String,
+        colorHex: String,
+        milliseconds: Int64,
+        isUncategorized: Bool
+    ) {
+        self.hour = hour
+        self.axisIndex = axisIndex
+        self.categoryID = categoryID
+        self.categoryName = categoryName
+        self.colorHex = colorHex
+        self.milliseconds = milliseconds
+        self.isUncategorized = isUncategorized
     }
 }
 
@@ -141,6 +184,7 @@ public struct DayItemBar: Identifiable, Equatable, Sendable {
     public var name: String
     public var milliseconds: Int64
     public var isAggregate: Bool
+    public var categoryColorHex: String?
 
     public var hours: Double { Double(milliseconds) / 3_600_000 }
 
@@ -148,12 +192,14 @@ public struct DayItemBar: Identifiable, Equatable, Sendable {
         id: String,
         name: String,
         milliseconds: Int64,
-        isAggregate: Bool = false
+        isAggregate: Bool = false,
+        categoryColorHex: String? = nil
     ) {
         self.id = id
         self.name = name
         self.milliseconds = milliseconds
         self.isAggregate = isAggregate
+        self.categoryColorHex = categoryColorHex
     }
 }
 
@@ -168,14 +214,22 @@ public final class DashboardModel: ObservableObject {
     @Published public private(set) var entityDisplays:
         [String: UsageEntityDisplay] = [:]
     @Published public private(set) var dayChartMode: DayChartMode = .hourly
+    @Published public private(set) var dayStartHour: Int = 0
 
     public let dataFileURL: URL
+    public let categoryStore: CategoryStore
 
     private let store: UsageSnapshotStore
     private let autoRefresh: Bool
     private let mappingStore: MappingStore
     private let screenTimeReader: ScreenTimeReader
+    private let screenTimeArchiveStore: ScreenTimeArchiveStore
     private var chromeSnapshot: UsageSnapshot?
+    /// Raw calendar-day Screen Time data, as read from Apple's database or
+    /// restored from the archive. `screenTimeDays`/`screenTimeHours` are the
+    /// logical-day views derived from these using `dayStartHour`.
+    private var rawScreenTimeDays: [String: [String: Int64]] = [:]
+    private var rawScreenTimeHours: [String: [Int: [String: Int64]]] = [:]
     private var screenTimeDays: [String: [String: Int64]] = [:]
     private var screenTimeHours: [String: [Int: [String: Int64]]] = [:]
     private var screenTimeStream: String?
@@ -185,6 +239,7 @@ public final class DashboardModel: ObservableObject {
     private var screenTimeTimer: Timer?
     private var appNames: [String: String] = [:]
     private var mappingCancellable: AnyCancellable?
+    private var categoryCancellable: AnyCancellable?
     private var timer: Timer?
     private var lastModificationDate: Date?
 
@@ -194,23 +249,37 @@ public final class DashboardModel: ObservableObject {
         initialScreenTime: ScreenTimeUsage? = nil,
         initialScreenTimeAccess: ScreenTimeAccessState? = nil,
         mappingStore: MappingStore = .shared,
+        categoryStore: CategoryStore = .shared,
+        dayStartHour: Int = 0,
         autoRefresh: Bool = true
     ) {
         self.dataFileURL = dataFileURL
         self.store = UsageSnapshotStore(fileURL: dataFileURL)
         self.autoRefresh = autoRefresh
         self.mappingStore = mappingStore
+        self.categoryStore = categoryStore
         self.screenTimeReader = ScreenTimeReader()
+        self.screenTimeArchiveStore = ScreenTimeArchiveStore()
         self.chromeSnapshot = initialSnapshot
-        self.selectedDay = CalendarDay.today()
+        let startHour = DayStartSetting.clamp(dayStartHour)
+        self.dayStartHour = startHour
+        self.selectedDay = CalendarDay.today(startHour: startHour)
+
+        // The real app restores its own Screen Time history before the first
+        // live read. Previews and tests pass initial data with autoRefresh
+        // disabled and do not touch the user's archive.
+        if autoRefresh {
+            loadScreenTimeArchive()
+        }
 
         if let initialScreenTime {
-            self.screenTimeDays = initialScreenTime.days
-            self.screenTimeHours = initialScreenTime.hours
+            self.rawScreenTimeDays = initialScreenTime.days
+            self.rawScreenTimeHours = initialScreenTime.hours
+            applyScreenTimeDayBoundary()
             self.screenTimeStream = initialScreenTime.stream
             self.screenTimeFetchedAt = initialScreenTime.fetchedAt
             self.screenTimeAccess = .ready(
-                dayCount: Self.activeAppDayCount(initialScreenTime.days),
+                dayCount: Self.activeAppDayCount(screenTimeDays),
                 updatedAt: initialScreenTime.fetchedAt
             )
         }
@@ -225,6 +294,117 @@ public final class DashboardModel: ObservableObject {
                 self?.rebuildUsage()
             }
         }
+        categoryCancellable = categoryStore.objectWillChange.sink {
+            [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.objectWillChange.send()
+            }
+        }
+    }
+
+    private func loadScreenTimeArchive() {
+        guard let archive = try? screenTimeArchiveStore.load(),
+              !archive.days.isEmpty else {
+            return
+        }
+        let updatedAt = archive.updatedAtDate
+        rawScreenTimeDays = archive.days
+        rawScreenTimeHours = archive.hourBuckets()
+        applyScreenTimeDayBoundary()
+        screenTimeStream = archive.stream
+        screenTimeFetchedAt = updatedAt
+        screenTimeAccess = .ready(
+            dayCount: Self.activeAppDayCount(screenTimeDays),
+            updatedAt: updatedAt
+        )
+    }
+
+    private func saveScreenTimeArchive() {
+        guard !rawScreenTimeDays.isEmpty else { return }
+        let archive = ScreenTimeArchive(
+            days: rawScreenTimeDays,
+            hoursByHour: rawScreenTimeHours,
+            stream: screenTimeStream,
+            updatedAt: screenTimeFetchedAt ?? Date()
+        )
+        try? screenTimeArchiveStore.save(archive)
+    }
+
+    private func applyScreenTimeDayBoundary() {
+        let early = DayBucketing.earlyHourBuckets(
+            from: rawScreenTimeHours,
+            startHour: dayStartHour
+        )
+        screenTimeDays = DayBucketing.shiftedDays(
+            days: rawScreenTimeDays,
+            earlyHourBuckets: early,
+            startHour: dayStartHour
+        )
+        screenTimeHours = DayBucketing.shiftedHours(
+            hours: rawScreenTimeHours,
+            startHour: dayStartHour
+        )
+    }
+
+    public func setDayStartHour(_ hour: Int) {
+        let value = DayStartSetting.clamp(hour)
+        guard value != dayStartHour else { return }
+
+        dayStartHour = value
+        DayStartSetting.save(value)
+        applyScreenTimeDayBoundary()
+
+        if case .ready(_, let updatedAt) = screenTimeAccess {
+            screenTimeAccess = .ready(
+                dayCount: Self.activeAppDayCount(screenTimeDays),
+                updatedAt: updatedAt
+            )
+        }
+
+        let today = todayKey
+        if followToday || selectedDay > today {
+            selectedDay = today
+            followToday = true
+        }
+        rebuildUsage()
+    }
+
+    public var todayKey: String {
+        CalendarDay.today(startHour: dayStartHour)
+    }
+
+    private var logicalChromeDays: [String: [String: Int64]] {
+        guard let chromeSnapshot else { return [:] }
+        let early = Self.chromeEarlyHourBuckets(
+            from: chromeSnapshot.earlyHours,
+            startHour: dayStartHour
+        )
+        return DayBucketing.shiftedDays(
+            days: chromeSnapshot.days,
+            earlyHourBuckets: early,
+            startHour: dayStartHour
+        )
+    }
+
+    private static func chromeEarlyHourBuckets(
+        from earlyHours: [String: [String: [String: Int64]]]?,
+        startHour: Int
+    ) -> [String: [Int: [String: Int64]]] {
+        let limit = DayStartSetting.clamp(startHour)
+        guard limit > 0, let earlyHours else { return [:] }
+
+        var result: [String: [Int: [String: Int64]]] = [:]
+        for (day, hours) in earlyHours {
+            for (rawHour, bucket) in hours {
+                guard let hour = Int(rawHour),
+                      hour >= 0, hour < limit,
+                      !bucket.isEmpty else {
+                    continue
+                }
+                result[day, default: [:]][hour] = bucket
+            }
+        }
+        return result
     }
 
     public func start() {
@@ -273,7 +453,7 @@ public final class DashboardModel: ObservableObject {
     }
 
     private func load(force: Bool) {
-        let today = CalendarDay.today()
+        let today = todayKey
         if followToday, selectedDay != today {
             selectedDay = today
         }
@@ -395,40 +575,24 @@ public final class DashboardModel: ObservableObject {
             }
             self.screenTimeLoading = false
             self.screenTimeTask = nil
-            self.applyScreenTime(
-                result,
-                full: full,
-                requestedAt: now
-            )
+            self.applyScreenTime(result)
         }
         screenTimeTask = task
     }
 
     private func applyScreenTime(
-        _ result: Result<ScreenTimeUsage, ScreenTimeReadError>,
-        full: Bool,
-        requestedAt: Date
+        _ result: Result<ScreenTimeUsage, ScreenTimeReadError>
     ) {
         switch result {
         case .success(let usage):
-            if full {
-                screenTimeDays = usage.days
-                screenTimeHours = usage.hours
-            } else {
-                let replaced = Set(
-                    CalendarDay.lastDays(2, endingAt: requestedAt)
-                )
-                for day in replaced {
-                    screenTimeDays.removeValue(forKey: day)
-                    screenTimeHours.removeValue(forKey: day)
-                }
-                for (day, bucket) in usage.days {
-                    screenTimeDays[day] = bucket
-                }
-                for (day, buckets) in usage.hours {
-                    screenTimeHours[day] = buckets
-                }
-            }
+            // Newly read days replace their matching days, while older days
+            // already saved by the app survive Apple's retention window.
+            ScreenTimeArchiveMerger.merge(
+                days: &rawScreenTimeDays,
+                hours: &rawScreenTimeHours,
+                with: usage
+            )
+            applyScreenTimeDayBoundary()
             if let stream = usage.stream {
                 screenTimeStream = stream
             }
@@ -438,6 +602,7 @@ public final class DashboardModel: ObservableObject {
                 updatedAt: usage.fetchedAt
             )
             rebuildUsage()
+            saveScreenTimeArchive()
             writeScreenTimeStatus(
                 state: "ready",
                 usage: usage
@@ -518,7 +683,7 @@ public final class DashboardModel: ObservableObject {
         }
 
         let merged = UsageMerge.build(
-            chromeDays: chromeSnapshot?.days ?? [:],
+            chromeDays: logicalChromeDays,
             screenTimeDays: screenTimeDays,
             mappings: mappings,
             appNames: appNames
@@ -567,10 +732,136 @@ public final class DashboardModel: ObservableObject {
         entityDisplays[entity] ?? UsageEntityDisplay(name: entity)
     }
 
+    public func categoryUsages(for entries: [SiteEntry]) -> [CategoryUsage] {
+        var totals: [String: Int64] = [:]
+        for entry in entries where entry.milliseconds > 0 {
+            let entity = display(for: entry.site)
+            let category = categoryStore.resolve(
+                bundleID: entity.bundleID,
+                domain: entry.site
+            )
+            let id = category?.id ?? CategoryStore.uncategorizedID
+            totals[id, default: 0] += entry.milliseconds
+        }
+
+        var usages: [CategoryUsage] = []
+        for (id, milliseconds) in totals where milliseconds > 0 {
+            if let category = categoryStore.category(id: id) {
+                usages.append(
+                    CategoryUsage(
+                        id: category.id,
+                        name: category.name,
+                        colorHex: category.colorHex,
+                        milliseconds: milliseconds,
+                        isUncategorized: false
+                    )
+                )
+            } else {
+                usages.append(
+                    CategoryUsage(
+                        id: CategoryStore.uncategorizedID,
+                        name: CategoryStore.uncategorizedName,
+                        colorHex: CategoryStore.uncategorizedColorHex,
+                        milliseconds: milliseconds,
+                        isUncategorized: true
+                    )
+                )
+            }
+        }
+
+        return usages.sorted { left, right in
+            if left.isUncategorized != right.isUncategorized {
+                return !left.isUncategorized
+            }
+            if left.milliseconds == right.milliseconds {
+                return left.name < right.name
+            }
+            return left.milliseconds > right.milliseconds
+        }
+    }
+
+    public var dayCategoryUsages: [CategoryUsage] {
+        categoryUsages(for: entries)
+    }
+
+    public func categoryUsages(forDay day: String) -> [CategoryUsage] {
+        categoryUsages(for: snapshot?.entries(for: day) ?? [])
+    }
+
+    public func categoryUsages(forDays days: [String]) -> [CategoryUsage] {
+        categoryUsages(
+            for: snapshot?.aggregatedEntries(over: days) ?? []
+        )
+    }
+
+    public func categoryUsages(
+        forMonthStart monthStart: String
+    ) -> [CategoryUsage] {
+        categoryUsages(
+            forDays: CalendarDay.monthDayKeys(containing: monthStart)
+        )
+    }
+
+    public var categoryRuleTargets: [CategoryRuleTarget] {
+        guard let snapshot else { return [] }
+        let entries = snapshot.aggregatedEntries(
+            over: Array(snapshot.days.keys)
+        )
+        var targets: [String: CategoryRuleTarget] = [:]
+
+        for entry in entries where entry.milliseconds > 0 {
+            let entity = display(for: entry.site)
+            let target: CategoryRuleTarget
+
+            if let bundleID = entity.bundleID, !bundleID.isEmpty {
+                target = CategoryRuleTarget(
+                    kind: .app,
+                    identifier: bundleID,
+                    name: entity.name,
+                    detail: entity.detail,
+                    milliseconds: entry.milliseconds
+                )
+            } else {
+                target = CategoryRuleTarget(
+                    kind: .domain,
+                    identifier: entry.site,
+                    name: entry.site,
+                    detail: "网站",
+                    milliseconds: entry.milliseconds
+                )
+            }
+
+            if var existing = targets[target.id] {
+                existing.milliseconds += target.milliseconds
+                if existing.detail == nil || existing.detail == "App" {
+                    existing.detail = target.detail
+                }
+                targets[target.id] = existing
+            } else {
+                targets[target.id] = target
+            }
+        }
+
+        return targets.values.sorted { left, right in
+            if left.milliseconds == right.milliseconds {
+                return left.name.localizedStandardCompare(right.name)
+                    == .orderedAscending
+            }
+            return left.milliseconds > right.milliseconds
+        }
+    }
+
     // MARK: - Day chart
 
     public func setDayChartMode(_ mode: DayChartMode) {
         dayChartMode = mode
+    }
+
+    /// Maps an x-axis index (0 = the configured start of day) to the actual
+    /// local clock hour shown on the hourly chart's axis.
+    public func clockHour(forAxisIndex index: Int) -> Int {
+        let offset = ((dayStartHour + index) % 24 + 24) % 24
+        return offset
     }
 
     public var dayHasHourlyData: Bool {
@@ -584,7 +875,8 @@ public final class DashboardModel: ObservableObject {
     public func dayHourlyBars(for day: String) -> [DayHourBar] {
         let buckets = screenTimeHours[day] ?? [:]
         let allowed = allowedHourlyBundles
-        return (0...23).map { hour in
+        return (0...23).map { axisIndex in
+            let hour = clockHour(forAxisIndex: axisIndex)
             var total: Int64 = 0
             for (bundleID, milliseconds) in buckets[hour] ?? [:]
             where milliseconds > 0 {
@@ -596,7 +888,11 @@ public final class DashboardModel: ObservableObject {
                     total += milliseconds
                 }
             }
-            return DayHourBar(hour: hour, milliseconds: total)
+            return DayHourBar(
+                hour: hour,
+                milliseconds: total,
+                axisIndex: axisIndex
+            )
         }
     }
 
@@ -607,6 +903,196 @@ public final class DashboardModel: ObservableObject {
             allowed.insert(mapping.bundleID)
         }
         return allowed
+    }
+
+    public var dayHourlyCategorySlices: [DayHourCategorySlice] {
+        dayHourlyCategorySlices(for: selectedDay)
+    }
+
+    public func dayHourlyCategorySlices(
+        for day: String
+    ) -> [DayHourCategorySlice] {
+        let buckets = screenTimeHours[day] ?? [:]
+        guard !buckets.isEmpty else { return [] }
+
+        let allowed = allowedHourlyBundles
+        let chromeWeights = chromeCategoryWeights(for: day)
+        var totals: [Int: [String: Int64]] = [:]
+
+        for hour in 0...23 {
+            for (bundleID, milliseconds) in buckets[hour] ?? [:]
+            where milliseconds > 0 {
+                if ScreenTimeFilter.isChromeUsage(bundleID) {
+                    distributeChromeHour(
+                        milliseconds,
+                        weights: chromeWeights,
+                        into: &totals[hour, default: [:]]
+                    )
+                } else if ScreenTimeFilter.isExcluded(bundleID) {
+                    continue
+                } else if allowed.contains(bundleID) {
+                    totals[hour, default: [:]][
+                        hourlyCategoryID(for: bundleID),
+                        default: 0
+                    ] += milliseconds
+                }
+            }
+        }
+
+        let orderedCategories = categoryUsages(forDay: day)
+        let order = Dictionary(
+            uniqueKeysWithValues: orderedCategories.enumerated().map {
+                ($0.element.id, $0.offset)
+            }
+        )
+
+        var slices: [DayHourCategorySlice] = []
+        for axisIndex in 0...23 {
+            let hour = clockHour(forAxisIndex: axisIndex)
+            for (categoryID, milliseconds) in totals[hour] ?? [:]
+            where milliseconds > 0 {
+                let meta = categoryMetadata(id: categoryID)
+                slices.append(
+                    DayHourCategorySlice(
+                        hour: hour,
+                        axisIndex: axisIndex,
+                        categoryID: categoryID,
+                        categoryName: meta.name,
+                        colorHex: meta.colorHex,
+                        milliseconds: milliseconds,
+                        isUncategorized: meta.isUncategorized
+                    )
+                )
+            }
+        }
+
+        return slices.sorted { left, right in
+            if left.axisIndex != right.axisIndex {
+                return left.axisIndex < right.axisIndex
+            }
+            let leftOrder = order[left.categoryID] ?? Int.max
+            let rightOrder = order[right.categoryID] ?? Int.max
+            if leftOrder != rightOrder {
+                return leftOrder < rightOrder
+            }
+            return left.categoryID < right.categoryID
+        }
+    }
+
+    /// Maps an hourly app bundle to its category. A mapped app uses its app
+    /// rule first, then a domain rule only when every mapped domain agrees.
+    private func hourlyCategoryID(for bundleID: String) -> String {
+        if let category = categoryStore.category(forBundleID: bundleID) {
+            return category.id
+        }
+        let domainCategoryIDs = Set(
+            mappingStore.effectiveMappings
+                .filter { $0.bundleID == bundleID }
+                .compactMap {
+                    categoryStore.category(forDomain: $0.domain)?.id
+                }
+        )
+        if domainCategoryIDs.count == 1,
+           let categoryID = domainCategoryIDs.first {
+            return categoryID
+        }
+        return CategoryStore.uncategorizedID
+    }
+
+    /// Screen Time only exposes Chrome as one aggregate bundle. Split each
+    /// hourly Chrome slot using the categories of that day's recorded Chrome
+    /// domains, plus the Chrome-unaccounted remainder.
+    private func chromeCategoryWeights(
+        for day: String
+    ) -> [String: Int64] {
+        var weights: [String: Int64] = [:]
+        var domainTotal: Int64 = 0
+
+        for (domain, milliseconds) in logicalChromeDays[day] ?? [:]
+        where milliseconds > 0 {
+            domainTotal += milliseconds
+            let mappedBundleID = mappingStore.effectiveMappings.first {
+                $0.domain == domain
+            }?.bundleID
+            let category = mappedBundleID.flatMap {
+                categoryStore.category(forBundleID: $0)
+            } ?? categoryStore.category(forDomain: domain)
+            weights[
+                category?.id ?? CategoryStore.uncategorizedID,
+                default: 0
+            ] += milliseconds
+        }
+
+        let chromeTotal = (screenTimeDays[day] ?? [:]).reduce(
+            Int64(0)
+        ) { partial, pair in
+            guard ScreenTimeFilter.isChromeUsage(pair.key) else {
+                return partial
+            }
+            return partial + max(0, pair.value)
+        }
+        let gap = chromeTotal - domainTotal
+        if gap >= ChromeGap.minimumMilliseconds {
+            let categoryID = categoryStore.category(
+                forBundleID: "com.google.Chrome"
+            )?.id ?? CategoryStore.uncategorizedID
+            weights[categoryID, default: 0] += gap
+        }
+
+        if weights.isEmpty, chromeTotal > 0 {
+            let categoryID = categoryStore.category(
+                forBundleID: "com.google.Chrome"
+            )?.id ?? CategoryStore.uncategorizedID
+            weights[categoryID] = chromeTotal
+        }
+        return weights
+    }
+
+    private func distributeChromeHour(
+        _ milliseconds: Int64,
+        weights: [String: Int64],
+        into totals: inout [String: Int64]
+    ) {
+        let entries = weights
+            .filter { $0.value > 0 }
+            .sorted { $0.key < $1.key }
+        let totalWeight = entries.reduce(Int64(0)) { $0 + $1.value }
+
+        guard totalWeight > 0 else {
+            totals[CategoryStore.uncategorizedID, default: 0] += milliseconds
+            return
+        }
+
+        var allocated: Int64 = 0
+        for (index, entry) in entries.enumerated() {
+            let portion: Int64
+            if index == entries.count - 1 {
+                portion = milliseconds - allocated
+            } else {
+                portion = Int64(
+                    Double(milliseconds)
+                        * Double(entry.value)
+                        / Double(totalWeight)
+                )
+            }
+            allocated += portion
+            if portion > 0 {
+                totals[entry.key, default: 0] += portion
+            }
+        }
+    }
+
+    private func categoryMetadata(
+        id: String
+    ) -> (name: String, colorHex: String, isUncategorized: Bool) {
+        if let category = categoryStore.category(id: id) {
+            return (category.name, category.colorHex, false)
+        }
+        return (
+            CategoryStore.uncategorizedName,
+            CategoryStore.uncategorizedColorHex,
+            true
+        )
     }
 
     public var dayHourlyTotalMilliseconds: Int64 {
@@ -628,10 +1114,17 @@ public final class DashboardModel: ObservableObject {
         guard !all.isEmpty else { return [] }
         let limit = 8
         var rows = all.prefix(limit).map { entry in
-            DayItemBar(
+            let entity = display(for: entry.site)
+            let category = categoryStore.resolve(
+                bundleID: entity.bundleID,
+                domain: entry.site
+            )
+            return DayItemBar(
                 id: entry.site,
-                name: display(for: entry.site).name,
-                milliseconds: entry.milliseconds
+                name: entity.name,
+                milliseconds: entry.milliseconds,
+                categoryColorHex: category?.colorHex
+                    ?? CategoryStore.uncategorizedColorHex
             )
         }
         if all.count > limit {
@@ -656,7 +1149,7 @@ public final class DashboardModel: ObservableObject {
     }
 
     public var isTodaySelected: Bool {
-        selectedDay == CalendarDay.today()
+        selectedDay == todayKey
     }
 
     // MARK: - Selected period
@@ -704,10 +1197,14 @@ public final class DashboardModel: ObservableObject {
     public var periodLabel: String {
         switch viewMode {
         case .day:
-            return DateText.dayLabel(selectedDay)
+            return DateText.dayLabel(
+                selectedDay,
+                startHour: dayStartHour
+            )
         case .week:
             return DateText.weekRangeLabel(
-                CalendarDay.weekDayKeys(containing: selectedDay)
+                CalendarDay.weekDayKeys(containing: selectedDay),
+                startHour: dayStartHour
             )
         case .month:
             return DateText.monthLabel(selectedDay)
@@ -719,7 +1216,10 @@ public final class DashboardModel: ObservableObject {
     public var periodTag: String? {
         switch viewMode {
         case .day:
-            return DateText.relativeTag(selectedDay)
+            return DateText.relativeTag(
+                selectedDay,
+                startHour: dayStartHour
+            )
         case .week:
             return isCurrentPeriod ? "本周" : nil
         case .month:
@@ -734,7 +1234,7 @@ public final class DashboardModel: ObservableObject {
             for: selectedDay,
             mode: viewMode
         ), let todayStart = periodStartKey(
-            for: CalendarDay.today(),
+            for: todayKey,
             mode: viewMode
         ) else {
             return false
@@ -760,7 +1260,7 @@ public final class DashboardModel: ObservableObject {
             for: selectedDay,
             mode: viewMode
         ), let todayStart = periodStartKey(
-            for: CalendarDay.today(),
+            for: todayKey,
             mode: viewMode
         ) else {
             return false
@@ -771,19 +1271,19 @@ public final class DashboardModel: ObservableObject {
     public func setViewMode(_ mode: StatsRange) {
         viewMode = mode
         if followToday {
-            selectedDay = CalendarDay.today()
+            selectedDay = todayKey
         }
     }
 
     public func goToCurrentPeriod() {
-        selectedDay = CalendarDay.today()
+        selectedDay = todayKey
         followToday = true
     }
 
     public func shiftPeriod(by delta: Int) {
         guard delta != 0 else { return }
 
-        let today = CalendarDay.today()
+        let today = todayKey
         let target: String?
         switch viewMode {
         case .day:
@@ -842,7 +1342,7 @@ public final class DashboardModel: ObservableObject {
 
     public func select(day: String) {
         guard CalendarDay.date(from: day) != nil else { return }
-        let today = CalendarDay.today()
+        let today = todayKey
         if day > today {
             goToCurrentPeriod()
             return
@@ -853,18 +1353,18 @@ public final class DashboardModel: ObservableObject {
 
     public func openDay(_ day: String) {
         guard CalendarDay.date(from: day) != nil,
-              day <= CalendarDay.today() else {
+              day <= todayKey else {
             return
         }
         selectedDay = day
         viewMode = .day
-        followToday = day == CalendarDay.today()
+        followToday = day == todayKey
     }
 
     public func openMonth(_ monthStart: String) {
         guard CalendarDay.date(from: monthStart) != nil else { return }
 
-        let today = CalendarDay.today()
+        let today = todayKey
         guard let currentMonthStart = CalendarDay.monthStartKey(
             containing: today
         ), monthStart <= currentMonthStart else {
@@ -920,7 +1420,7 @@ public final class DashboardModel: ObservableObject {
     }
 
     public var earliestDay: String {
-        let today = CalendarDay.today()
+        let today = todayKey
         guard let snapshot else { return today }
         let active = snapshot.days.compactMap { day, bucket in
             bucket.values.contains { $0 > 0 } ? day : nil
@@ -949,7 +1449,7 @@ public final class DashboardModel: ObservableObject {
     }
 
     public var selectedYearMonths: [YearMonthSummary] {
-        let today = CalendarDay.today()
+        let today = todayKey
         guard let currentMonthStart = CalendarDay.monthStartKey(
             containing: today
         ) else {

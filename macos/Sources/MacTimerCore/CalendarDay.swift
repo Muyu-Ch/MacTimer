@@ -48,8 +48,23 @@ public enum CalendarDay {
         return (year, month, day)
     }
 
-    public static func today(_ now: Date = Date(), calendar: Calendar = .current) -> String {
-        key(for: now, calendar: calendar)
+    /// The logical day containing `now`. With `startHour = 4`, the period
+    /// 00:00–04:00 still belongs to the previous day.
+    public static func today(
+        _ now: Date = Date(),
+        startHour: Int = 0,
+        calendar: Calendar = .current
+    ) -> String {
+        let hour = DayStartSetting.clamp(startHour)
+        guard hour > 0 else {
+            return key(for: now, calendar: calendar)
+        }
+        let shifted = calendar.date(
+            byAdding: .hour,
+            value: -hour,
+            to: now
+        ) ?? now
+        return key(for: shifted, calendar: calendar)
     }
 
     public static func shifting(

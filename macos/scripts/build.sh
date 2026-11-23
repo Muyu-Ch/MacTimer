@@ -79,6 +79,10 @@ cp "$BIN_DIR/MacTimer" "$APP_PATH/Contents/MacOS/MacTimer"
 cp "$MACOS_DIR/Resources/Info.plist" "$APP_PATH/Contents/Info.plist"
 cp "$MACOS_DIR/Resources/AppIcon.icns" \
     "$APP_PATH/Contents/Resources/AppIcon.icns"
+if [[ -d "$MACOS_DIR/Resources/Support" ]]; then
+    ditto "$MACOS_DIR/Resources/Support" \
+        "$APP_PATH/Contents/Resources/Support"
+fi
 printf 'APPL????' > "$APP_PATH/Contents/PkgInfo"
 chmod +x "$APP_PATH/Contents/MacOS/MacTimer"
 

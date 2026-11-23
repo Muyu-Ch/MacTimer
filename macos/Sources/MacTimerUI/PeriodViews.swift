@@ -11,13 +11,17 @@ struct WeekOverviewCard: View {
         max(1, days.map(\.milliseconds).max() ?? 0)
     }
 
+    private var categoryUsages: [CategoryUsage] {
+        model.categoryUsages(forDays: model.periodDays)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("每日使用")
                     .font(.system(size: 12.5, weight: .semibold))
                 Spacer()
-                Text("点击某天查看当天明细")
+                Text("彩色分段为分类 · 点击某天查看明细")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -27,6 +31,12 @@ struct WeekOverviewCard: View {
                     weekColumn(day)
                 }
             }
+
+            if !categoryUsages.isEmpty {
+                Divider()
+                    .overlay(Theme.hairline(scheme))
+                CategoryLegend(usages: categoryUsages)
+            }
         }
         .padding(20)
         .stayCard(scheme)
@@ -34,11 +44,12 @@ struct WeekOverviewCard: View {
 
     private func weekColumn(_ day: HistoryBar) -> some View {
         let isSelected = day.day == model.selectedDay
-        let isFuture = day.day > CalendarDay.today()
-        let isToday = day.day == CalendarDay.today()
+        let isFuture = day.day > model.todayKey
+        let isToday = day.day == model.todayKey
         let weekdayIndex = CalendarDay.mondayIndex(for: day.day) ?? 0
         let fraction = Double(day.milliseconds) / Double(maxMilliseconds)
         let barHeight = max(day.milliseconds > 0 ? 3 : 0, 92 * fraction)
+        let categories = model.categoryUsages(forDay: day.day)
 
         return Button {
             model.openDay(day.day)
@@ -60,9 +71,13 @@ struct WeekOverviewCard: View {
                 .frame(height: 12)
 
                 ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Theme.accent(scheme))
-                        .frame(width: 18, height: barHeight)
+                    if barHeight > 0 {
+                        CategoryStackedBar(
+                            usages: categories,
+                            width: 18,
+                            height: barHeight
+                        )
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 92)
@@ -118,9 +133,13 @@ struct MonthCalendarCard: View {
 
     private var grid: [HistoryBar] { model.selectedMonthGrid }
     private var prefix: String { model.selectedMonthPrefix }
-    private var today: String { CalendarDay.today() }
+    private var today: String { model.todayKey }
     private var maxMilliseconds: Int64 {
         max(1, model.selectedMonthMaxMilliseconds)
+    }
+
+    private var categoryUsages: [CategoryUsage] {
+        model.categoryUsages(forDays: model.periodDays)
     }
 
     private var monthIsEmpty: Bool {
@@ -162,6 +181,21 @@ struct MonthCalendarCard: View {
                     Text("本月还没有记录")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
+                }
+            }
+
+            if !categoryUsages.isEmpty {
+                Divider()
+                    .overlay(Theme.hairline(scheme))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("分类用时")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    CategoryCompositionBar(usages: categoryUsages)
+                    CategoryLegend(
+                        usages: categoryUsages,
+                        minimumColumnWidth: 130
+                    )
                 }
             }
         }
@@ -296,13 +330,17 @@ struct YearOverviewCard: View {
         max(1, months.map(\.milliseconds).max() ?? 0)
     }
 
+    private var categoryUsages: [CategoryUsage] {
+        model.categoryUsages(forDays: model.periodDays)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("每月使用")
                     .font(.system(size: 12.5, weight: .semibold))
                 Spacer()
-                Text("点击月份查看月视图")
+                Text("彩色分段为分类 · 点击月份查看月视图")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -311,6 +349,12 @@ struct YearOverviewCard: View {
                 ForEach(months) { month in
                     yearColumn(month)
                 }
+            }
+
+            if !categoryUsages.isEmpty {
+                Divider()
+                    .overlay(Theme.hairline(scheme))
+                CategoryLegend(usages: categoryUsages)
             }
         }
         .padding(20)
@@ -321,15 +365,22 @@ struct YearOverviewCard: View {
         let isSelected = month.key.hasPrefix(model.selectedMonthPrefix)
         let fraction = Double(month.milliseconds) / Double(maxMilliseconds)
         let barHeight = max(month.milliseconds > 0 ? 3 : 0, 100 * fraction)
+        let categories = model.categoryUsages(
+            forMonthStart: month.key
+        )
 
         return Button {
             model.openMonth(month.key)
         } label: {
             VStack(spacing: 4) {
                 ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Theme.accent(scheme))
-                        .frame(width: 16, height: barHeight)
+                    if barHeight > 0 {
+                        CategoryStackedBar(
+                            usages: categories,
+                            width: 16,
+                            height: barHeight
+                        )
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 100)

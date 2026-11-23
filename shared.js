@@ -9,9 +9,14 @@ export const MAX_TRUSTED_GAP_MS = 5 * 60 * 1000;
 
 export const CURRENT_KEY = 'current';
 export const DAY_PREFIX = 'day:';
+export const EARLY_PREFIX = 'early:';
 
 export function dayStorageKey(day) {
   return `${DAY_PREFIX}${day}`;
+}
+
+export function earlyStorageKey(day) {
+  return `${EARLY_PREFIX}${day}`;
 }
 
 // Second-level labels under two-letter country TLDs that commonly form a
@@ -120,6 +125,47 @@ export function splitSpan(startMs, endMs) {
     const segmentEnd = Math.min(endMs, nextDayStart(cursor));
     if (segmentEnd <= cursor) break;
     segments.push({ day: dayKey(cursor), ms: segmentEnd - cursor });
+    cursor = segmentEnd;
+    guard += 1;
+  }
+  return segments;
+}
+
+/**
+ * Split a time span at local hour boundaries. Used to keep a small record of
+ * the 00:00–04:00 part of each calendar day, which the Mac app can move to
+ * the previous logical day when the user chooses a later day start.
+ */
+export function splitSpanByHour(startMs, endMs) {
+  const segments = [];
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    endMs <= startMs
+  ) {
+    return segments;
+  }
+
+  let cursor = startMs;
+  let guard = 0;
+  while (cursor < endMs && guard < 4_000) {
+    const date = new Date(cursor);
+    const hourEnd = new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      date.getHours() + 1,
+      0,
+      0,
+      0,
+    ).getTime();
+    const segmentEnd = Math.min(endMs, hourEnd);
+    if (segmentEnd <= cursor) break;
+    segments.push({
+      day: dayKey(cursor),
+      hour: date.getHours(),
+      ms: segmentEnd - cursor,
+    });
     cursor = segmentEnd;
     guard += 1;
   }

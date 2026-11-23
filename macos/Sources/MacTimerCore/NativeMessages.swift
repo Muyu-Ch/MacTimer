@@ -6,19 +6,22 @@ public struct NativeSyncPayload: Codable, Sendable {
     public var reset: Bool?
     public var current: CurrentSession?
     public var days: [String: [String: Int64]]?
+    public var earlyHours: [String: [String: [String: Int64]]]?
 
     public init(
         type: String,
         sentAt: Int64? = nil,
         reset: Bool? = nil,
         current: CurrentSession? = nil,
-        days: [String: [String: Int64]]? = nil
+        days: [String: [String: Int64]]? = nil,
+        earlyHours: [String: [String: [String: Int64]]]? = nil
     ) {
         self.type = type
         self.sentAt = sentAt
         self.reset = reset
         self.current = current
         self.days = days
+        self.earlyHours = earlyHours
     }
 }
 

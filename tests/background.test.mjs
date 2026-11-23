@@ -162,6 +162,9 @@ fakeNow = new Date(2026, 10, 24, 0, 0, 30).getTime();
 await __refresh();
 assert.equal(storage['day:2026-11-23']['github.com'], 30_000);
 assert.equal(storage['day:2026-11-24']['github.com'], 30_000);
+assert.deepEqual(storage['early:2026-11-24'], {
+  '0': { 'github.com': 30_000 },
+});
 
 // The native bridge sends a full reset with every stored day when forced.
 const fullSync = await __syncNativeIfDue(fakeNow, true);
@@ -172,6 +175,10 @@ assert.equal(nativeCalls[0].payload.reset, true);
 assert.equal(nativeCalls[0].payload.type, 'sync');
 assert.equal(nativeCalls[0].payload.days['2026-11-23']['github.com'], 30_000);
 assert.equal(nativeCalls[0].payload.days['2026-11-24']['github.com'], 30_000);
+assert.equal(
+  nativeCalls[0].payload.earlyHours['2026-11-24']['0']['github.com'],
+  30_000,
+);
 assert.ok(storage.nativeLastSuccessAt > 0);
 
 // A later delta only contains today's and yesterday's buckets.
@@ -185,6 +192,22 @@ assert.deepEqual(
   Object.keys(nativeCalls[1].payload.days).sort(),
   ['2026-11-23', '2026-11-24'],
 );
+assert.equal(
+  nativeCalls[1].payload.earlyHours['2026-11-24']['0']['github.com'],
+  30_000,
+);
+
+// Early-morning time is split by clock hour for the Mac app.
+resetStorage();
+setPage({ url: 'https://github.com/', isFocused: true });
+fakeNow = new Date(2026, 10, 25, 1, 58, 0).getTime();
+await __refresh();
+fakeNow = new Date(2026, 10, 25, 2, 2, 0).getTime();
+await __refresh();
+assert.deepEqual(storage['early:2026-11-25'], {
+  '1': { 'github.com': 2 * 60 * 1000 },
+  '2': { 'github.com': 2 * 60 * 1000 },
+});
 
 Date.now = realDateNow;
 console.log('background: ok');

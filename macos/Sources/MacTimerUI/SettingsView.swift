@@ -6,7 +6,11 @@ import UniformTypeIdentifiers
 public struct MacTimerSettingsView: View {
     @ObservedObject private var model: DashboardModel
     @ObservedObject private var store: MappingStore
+    @ObservedObject private var categoryStore: CategoryStore
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage(AppearanceMode.storageKey)
+    private var appearanceRaw = AppearanceMode.system.rawValue
 
     @State private var domainInput = ""
     @State private var selectedApp: SelectedApp?
@@ -21,10 +25,12 @@ public struct MacTimerSettingsView: View {
     public init(
         model: DashboardModel,
         store: MappingStore,
+        categoryStore: CategoryStore = .shared,
         previewMode: Bool = false
     ) {
         self.model = model
         self.store = store
+        self.categoryStore = categoryStore
         self.previewMode = previewMode
     }
 
@@ -46,7 +52,11 @@ public struct MacTimerSettingsView: View {
     private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
+            aboutSection
+            appearanceSection
+            dayStartSection
             screenTimeSection
+            CategorySettingsSection(model: model, store: categoryStore)
             mappingSection
         }
         .padding(24)
@@ -57,10 +67,180 @@ public struct MacTimerSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("设置")
                 .font(.system(size: 24, weight: .semibold))
-            Text("管理 Apple 屏幕使用时间的读取权限，以及网站与 App 的合并关系。")
+            Text("调整外观，管理屏幕使用时间、分类和网站与 App 的合并关系。")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var selectedAppearance: AppearanceMode {
+        AppearanceMode(rawValue: appearanceRaw) ?? .system
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("外观")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Text(selectedAppearance.label)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Theme.accentInk(scheme))
+            }
+
+            Text("应用于主窗口、设置窗口和信息页面。跟随系统会随 macOS 自动切换。")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 4) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    let selected = selectedAppearance == mode
+                    Button {
+                        appearanceRaw = mode.rawValue
+                        AppearanceMode.apply(mode)
+                    } label: {
+                        Label(mode.label, systemImage: mode.systemImage)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(
+                                selected ? Color.primary : Color.secondary
+                            )
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(
+                                selected
+                                    ? Theme.card(scheme)
+                                    : Color.clear,
+                                in: RoundedRectangle(
+                                    cornerRadius: 7,
+                                    style: .continuous
+                                )
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(
+                        selected ? [.isSelected] : []
+                    )
+                    .help("使用\(mode.label)外观")
+                }
+            }
+            .padding(4)
+            .background(
+                Theme.surface2(scheme),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Theme.border(scheme), lineWidth: 1)
+            )
+        }
+        .padding(18)
+        .stayCard(scheme)
+    }
+
+    // MARK: - Day start
+
+    private var dayStartSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("每天的开始时间")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Text(String(format: "%02d:00", model.dayStartHour))
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Theme.accentInk(scheme))
+                    .monospacedDigit()
+            }
+
+            Text("一天从所选时间开始。例如选择 04:00 后，每天 00:00–04:00 的使用会计入前一天。修改后会立即重新统计已保存的数据。")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 4) {
+                ForEach(DayStartSetting.allowedHours, id: \.self) { hour in
+                    let selected = model.dayStartHour == hour
+                    Button {
+                        model.setDayStartHour(hour)
+                    } label: {
+                        Text(String(format: "%02d:00", hour))
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(
+                                selected ? Color.primary : Color.secondary
+                            )
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(
+                                selected
+                                    ? Theme.card(scheme)
+                                    : Color.clear,
+                                in: RoundedRectangle(
+                                    cornerRadius: 7,
+                                    style: .continuous
+                                )
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(
+                        selected ? [.isSelected] : []
+                    )
+                    .help("每天从 \(String(format: "%02d:00", hour)) 开始")
+                }
+            }
+            .padding(4)
+            .background(
+                Theme.surface2(scheme),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Theme.border(scheme), lineWidth: 1)
+            )
+
+            Text("Screen Time 历史会按已保存的小时数据重新归入新的日期。Chrome 需要扩展记录凌晨分时数据；更新前已经汇总的网页历史无法精确回移。")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .stayCard(scheme)
+    }
+
+    // MARK: - Information
+
+    private var aboutSection: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 21, weight: .light))
+                .foregroundStyle(Theme.accentInk(scheme))
+                .frame(width: 38, height: 38)
+                .background(Theme.accentWash(scheme), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("关于 MacTimer")
+                    .font(.system(size: 13.5, weight: .semibold))
+                Text("版本信息、开发者信息和收款码。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("查看信息") {
+                openWindow(id: "about")
+            }
+            .buttonStyle(
+                CompactActionButtonStyle(scheme: scheme, emphasized: false)
+            )
+        }
+        .padding(18)
+        .stayCard(scheme)
     }
 
     // MARK: - Screen Time access

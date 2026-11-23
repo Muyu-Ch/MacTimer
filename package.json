@@ -1,6 +1,6 @@
 {
   "name": "mactimer",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Chrome extension that tracks daily time per website.",

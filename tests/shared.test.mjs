@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 
 import {
   dayKey,
+  earlyStorageKey,
   entriesForDay,
   formatBadge,
   formatDuration,
   parseDayKey,
   siteFromUrl,
   splitSpan,
+  splitSpanByHour,
 } from '../shared.js';
 
 // Site grouping
@@ -42,6 +44,15 @@ assert.deepEqual(splitSpan(start, end), [
 ]);
 assert.deepEqual(splitSpan(end, start), []);
 assert.deepEqual(splitSpan(start, start), []);
+
+const earlyStart = new Date(2026, 10, 24, 1, 58, 0).getTime();
+const earlyEnd = new Date(2026, 10, 24, 2, 2, 0).getTime();
+assert.deepEqual(splitSpanByHour(earlyStart, earlyEnd), [
+  { day: '2026-11-24', hour: 1, ms: 2 * 60 * 1000 },
+  { day: '2026-11-24', hour: 2, ms: 2 * 60 * 1000 },
+]);
+assert.deepEqual(splitSpanByHour(earlyEnd, earlyStart), []);
+assert.equal(earlyStorageKey('2026-11-24'), 'early:2026-11-24');
 
 // Live aggregation
 const liveStart = new Date(2026, 10, 22, 10, 0, 0).getTime();

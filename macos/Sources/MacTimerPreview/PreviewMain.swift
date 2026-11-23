@@ -14,10 +14,13 @@ struct MacTimerPreview {
         var noApps = false
         var permission = false
         var showSettings = false
+        var showAbout = false
         var itemsChart = false
+        var categoryChart = false
         var inputFile: String?
         var selectedDay: String?
         var mode: StatsRange?
+        var dayStartHour = 0
 
         let arguments = Array(CommandLine.arguments.dropFirst())
         var index = 0
@@ -36,8 +39,12 @@ struct MacTimerPreview {
                 permission = true
             case "--settings":
                 showSettings = true
+            case "--about":
+                showAbout = true
             case "--items-chart":
                 itemsChart = true
+            case "--category-chart":
+                categoryChart = true
             case "--file":
                 if index + 1 < arguments.count {
                     index += 1
@@ -52,6 +59,11 @@ struct MacTimerPreview {
                 if index + 1 < arguments.count {
                     index += 1
                     mode = StatsRange(rawValue: arguments[index])
+                }
+            case "--day-start":
+                if index + 1 < arguments.count {
+                    index += 1
+                    dayStartHour = Int(arguments[index]) ?? 0
                 }
             default:
                 output = argument
@@ -85,11 +97,54 @@ struct MacTimerPreview {
                 appName: "哔哩哔哩"
             )
         }
+
+        let categoryStore = CategoryStore(defaults: nil, load: false)
+        if !empty {
+            for domain in ["github.com", "stackoverflow.com"] {
+                try? categoryStore.addDomainRule(
+                    domainInput: domain,
+                    categoryID: "study"
+                )
+            }
+            for domain in ["notion.so", "figma.com", "linear.app"] {
+                try? categoryStore.addDomainRule(
+                    domainInput: domain,
+                    categoryID: "work"
+                )
+            }
+            for domain in [
+                "youtube.com", "x.com", "reddit.com",
+                "bilibili.com", "steampowered.com",
+            ] {
+                try? categoryStore.addDomainRule(
+                    domainInput: domain,
+                    categoryID: "entertainment"
+                )
+            }
+            try? categoryStore.addAppRule(
+                bundleID: "com.bilibili.bilibiliPC",
+                appName: "哔哩哔哩",
+                categoryID: "entertainment"
+            )
+            try? categoryStore.addAppRule(
+                bundleID: "com.valvesoftware.steam",
+                appName: "Steam",
+                categoryID: "entertainment"
+            )
+            try? categoryStore.addAppRule(
+                bundleID: "com.apple.Music",
+                appName: "音乐",
+                categoryID: "entertainment"
+            )
+        }
+
         let model = DashboardModel(
             initialSnapshot: snapshot,
             initialScreenTime: screenTime,
             initialScreenTimeAccess: permission ? .needsPermission : nil,
             mappingStore: mappingStore,
+            categoryStore: categoryStore,
+            dayStartHour: dayStartHour,
             autoRefresh: false
         )
         if let selectedDay {
@@ -98,20 +153,37 @@ struct MacTimerPreview {
         if let mode {
             model.setViewMode(mode)
         }
-        if itemsChart {
+        if categoryChart {
+            model.setDayChartMode(.category)
+        } else if itemsChart {
             model.setDayChartMode(.items)
         }
 
         let content: AnyView
-        if showSettings {
+        if showAbout {
+            let supportDir = URL(
+                fileURLWithPath: FileManager.default.currentDirectoryPath
+            ).appendingPathComponent("macos/Resources/Support")
+            setenv(
+                "MACTIMER_SUPPORT_IMAGE_DIR",
+                supportDir.path,
+                1
+            )
+            content = AnyView(
+                MacTimerAboutView(previewMode: true)
+                    .environment(\.colorScheme, dark ? .dark : .light)
+                    .frame(width: 700, height: 900)
+            )
+        } else if showSettings {
             content = AnyView(
                 MacTimerSettingsView(
                     model: model,
                     store: mappingStore,
+                    categoryStore: categoryStore,
                     previewMode: true
                 )
                 .environment(\.colorScheme, dark ? .dark : .light)
-                .frame(width: 700, height: 1_120)
+                .frame(width: 700, height: 2_650)
             )
         } else {
             content = AnyView(

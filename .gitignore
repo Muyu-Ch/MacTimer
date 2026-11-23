@@ -14,5 +14,6 @@ __pycache__/
 .env
 usage.json
 screen-time-status.json
+screen-time-archive.json
 macos/Resources/AppIcon.iconset/
 dist/

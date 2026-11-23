@@ -4,19 +4,29 @@ public enum DateText {
     public static let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
     public static let mondayFirstWeekdays = ["一", "二", "三", "四", "五", "六", "日"]
 
-    public static func dayLabel(_ key: String, now: Date = Date()) -> String {
+    public static func dayLabel(
+        _ key: String,
+        now: Date = Date(),
+        startHour: Int = 0
+    ) -> String {
         guard let parts = CalendarDay.components(key),
               let weekday = CalendarDay.weekday(key) else {
             return key
         }
 
-        let currentYear = CalendarDay.components(CalendarDay.today(now))?.year
+        let currentYear = CalendarDay.components(
+            CalendarDay.today(now, startHour: startHour)
+        )?.year
         let year = parts.year == currentYear ? "" : "\(parts.year)年"
         return "\(year)\(parts.month)月\(parts.day)日 · 周\(weekdays[weekday])"
     }
 
-    public static func relativeTag(_ key: String, now: Date = Date()) -> String? {
-        let today = CalendarDay.today(now)
+    public static func relativeTag(
+        _ key: String,
+        now: Date = Date(),
+        startHour: Int = 0
+    ) -> String? {
+        let today = CalendarDay.today(now, startHour: startHour)
         if key == today { return "今天" }
         if key == CalendarDay.shifting(today, by: -1) { return "昨天" }
         return nil
@@ -69,7 +79,8 @@ public enum DateText {
 
     public static func weekRangeLabel(
         _ keys: [String],
-        now: Date = Date()
+        now: Date = Date(),
+        startHour: Int = 0
     ) -> String {
         guard let firstKey = keys.first,
               let lastKey = keys.last,
@@ -78,7 +89,9 @@ public enum DateText {
             return ""
         }
 
-        let currentYear = CalendarDay.components(CalendarDay.today(now))?.year
+        let currentYear = CalendarDay.components(
+            CalendarDay.today(now, startHour: startHour)
+        )?.year
         if first.year == last.year {
             let prefix = first.year == currentYear ? "" : "\(first.year)年"
             return "\(prefix)\(first.month)月\(first.day)日 – \(last.month)月\(last.day)日"

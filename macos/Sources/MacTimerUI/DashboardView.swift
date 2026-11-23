@@ -115,6 +115,7 @@ public struct DashboardView: View {
 private struct HeaderView: View {
     @ObservedObject var model: DashboardModel
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(spacing: 12) {
@@ -194,6 +195,13 @@ private struct HeaderView: View {
                 help: "重新读取本地数据"
             ) {
                 model.reload(force: true)
+            }
+
+            HeaderIconButton(
+                systemName: "gearshape",
+                help: "设置（⌘,）"
+            ) {
+                openSettings()
             }
         }
         .padding(.horizontal, 30)
@@ -408,6 +416,14 @@ private struct StatBlock: View {
     }
 }
 
+private struct HourlyChartRow: Identifiable {
+    let axisIndex: Int
+    let categoryID: String
+    let hours: Double
+
+    var id: String { "\(axisIndex)-\(categoryID)" }
+}
+
 private struct DayUsageChartCard: View {
     @ObservedObject var model: DashboardModel
     @Environment(\.colorScheme) private var scheme
@@ -417,23 +433,31 @@ private struct DayUsageChartCard: View {
     }
 
     private var hasContent: Bool {
-        if model.dayChartMode == .hourly {
+        switch model.dayChartMode {
+        case .hourly:
             return model.dayHasHourlyData || !model.entries.isEmpty
+        case .items:
+            return !model.entries.isEmpty
+        case .category:
+            return !model.dayCategoryUsages.isEmpty
         }
-        return !model.entries.isEmpty
     }
 
     private var subtitle: String {
-        if model.dayChartMode == .hourly {
+        switch model.dayChartMode {
+        case .hourly:
             if model.dayHasHourlyData {
-                return "按小时 · 来自屏幕使用时间"
+                return "按小时 · 彩色分段为分类"
             }
             if !model.entries.isEmpty {
                 return "无分时数据，显示网站/App"
             }
             return "暂无记录"
+        case .items:
+            return "彩色柱为分类 · 网页 + App"
+        case .category:
+            return "按自定义分类汇总"
         }
-        return "网页 + App"
     }
 
     var body: some View {
@@ -465,9 +489,24 @@ private struct DayUsageChartCard: View {
                 .frame(maxWidth: .infinity, minHeight: 210)
             } else if showsHourly {
                 hourlyChart
+                if !model.dayCategoryUsages.isEmpty {
+                    CategoryLegend(usages: model.dayCategoryUsages)
+                        .padding(.top, 2)
+                }
+                footer
+            } else if model.dayChartMode == .category {
+                categoryChart
+                if !model.dayCategoryUsages.isEmpty {
+                    CategoryLegend(usages: model.dayCategoryUsages)
+                        .padding(.top, 2)
+                }
                 footer
             } else {
                 itemsChart
+                if !model.dayCategoryUsages.isEmpty {
+                    CategoryLegend(usages: model.dayCategoryUsages)
+                        .padding(.top, 2)
+                }
                 footer
             }
         }
@@ -477,17 +516,52 @@ private struct DayUsageChartCard: View {
 
     private var hourlyChart: some View {
         let bars = model.dayHourlyBars
+        let slices = model.dayHourlyCategorySlices
         let maxHours = bars.map(\.hours).max() ?? 0
         let upper = max(1.0 / 60.0, maxHours * 1.12)
 
-        return Chart(bars) { bar in
+        let rows: [HourlyChartRow]
+        var categoryIDs: [String] = []
+        var categoryColors: [Color] = []
+        if slices.isEmpty {
+            rows = bars.map {
+                HourlyChartRow(
+                    axisIndex: $0.axisIndex,
+                    categoryID: "__all",
+                    hours: $0.hours
+                )
+            }
+            categoryIDs = ["__all"]
+            categoryColors = [Theme.accent(scheme)]
+        } else {
+            rows = slices.map {
+                HourlyChartRow(
+                    axisIndex: $0.axisIndex,
+                    categoryID: $0.categoryID,
+                    hours: $0.hours
+                )
+            }
+            for slice in slices
+            where !categoryIDs.contains(slice.categoryID) {
+                categoryIDs.append(slice.categoryID)
+                categoryColors.append(
+                    CategoryVisuals.color(slice.colorHex, scheme: scheme)
+                )
+            }
+        }
+
+        return Chart(rows) { row in
             BarMark(
-                x: .value("小时", bar.hour),
-                y: .value("小时", bar.hours)
+                x: .value("小时", row.axisIndex),
+                y: .value("小时", row.hours)
             )
-            .foregroundStyle(Theme.accent(scheme))
+            .foregroundStyle(by: .value("分类", row.categoryID))
             .cornerRadius(3)
         }
+        .chartForegroundStyleScale(
+            domain: categoryIDs,
+            range: categoryColors
+        )
         .chartLegend(.hidden)
         .chartYScale(domain: 0...upper)
         .chartXScale(domain: -1...24)
@@ -511,11 +585,16 @@ private struct DayUsageChartCard: View {
                 AxisGridLine()
                     .foregroundStyle(Theme.gridline(scheme).opacity(0.65))
                 AxisValueLabel {
-                    if let hour = value.as(Int.self) {
-                        Text(String(format: "%02d:00", hour))
-                            .font(.system(size: 8.5))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                    if let axisIndex = value.as(Int.self) {
+                        Text(
+                            String(
+                                format: "%02d:00",
+                                model.clockHour(forAxisIndex: axisIndex)
+                            )
+                        )
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                     }
                 }
             }
@@ -533,7 +612,7 @@ private struct DayUsageChartCard: View {
                 x: .value("项目", row.name),
                 y: .value("小时", row.hours)
             )
-            .foregroundStyle(Theme.accent(scheme))
+            .foregroundStyle(itemColor(row))
             .cornerRadius(3)
         }
         .chartLegend(.hidden)
@@ -564,6 +643,65 @@ private struct DayUsageChartCard: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.65)
+                    }
+                }
+            }
+        }
+        .frame(height: 210)
+    }
+
+    private var categoryChart: some View {
+        let rows = model.dayCategoryUsages
+        let maxHours = rows.map(\.hours).max() ?? 0
+        let upper = max(1.0 / 60.0, maxHours * 1.12)
+
+        return Chart(rows) { usage in
+            BarMark(
+                x: .value("分类", usage.id),
+                y: .value("小时", usage.hours)
+            )
+            .foregroundStyle(
+                CategoryVisuals.color(usage.colorHex, scheme: scheme)
+            )
+            .cornerRadius(3)
+        }
+        .chartLegend(.hidden)
+        .chartYScale(domain: 0...upper)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
+                value in
+                AxisGridLine()
+                    .foregroundStyle(Theme.gridline(scheme))
+                AxisValueLabel {
+                    if let hours = value.as(Double.self) {
+                        Text(DurationText.axisLabel(hours: hours))
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: rows.map(\.id)) { value in
+                AxisTick()
+                    .foregroundStyle(Theme.hairline(scheme))
+                AxisValueLabel {
+                    if let id = value.as(String.self) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(categoryColor(forID: id))
+                                .frame(width: 4.5, height: 4.5)
+                            Text(
+                                shortItemLabel(
+                                    categoryName(forID: id)
+                                )
+                            )
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                        }
                     }
                 }
             }
@@ -603,6 +741,33 @@ private struct DayUsageChartCard: View {
                 .padding(.leading, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+        } else if model.dayChartMode == .category {
+            let usages = model.dayCategoryUsages
+            let top = usages.max {
+                $0.milliseconds < $1.milliseconds
+            }
+            HStack(alignment: .top, spacing: 0) {
+                StatBlock(
+                    title: "分类数",
+                    value: "\(usages.count) 类",
+                    detail: "按自定义标签"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+                    .frame(height: 36)
+                    .overlay(Theme.hairline(scheme))
+
+                StatBlock(
+                    title: "用时最多",
+                    value: top?.name ?? "—",
+                    detail: top.map {
+                        DurationText.string(milliseconds: $0.milliseconds)
+                    } ?? ""
+                )
+                .padding(.leading, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         } else {
             HStack(alignment: .top, spacing: 0) {
                 StatBlock(
@@ -632,12 +797,39 @@ private struct DayUsageChartCard: View {
     }
 
     private func peakLabel(for hour: Int) -> String {
-        String(format: "%02d:00–%02d:00", hour, hour + 1)
+        String(
+            format: "%02d:00–%02d:00",
+            hour,
+            (hour + 1) % 24
+        )
     }
 
     private func shortItemLabel(_ name: String) -> String {
         guard name.count > 11 else { return name }
         return String(name.prefix(10)) + "…"
+    }
+
+    private func itemColor(_ row: DayItemBar) -> Color {
+        guard let hex = row.categoryColorHex else {
+            return CategoryVisuals.color(
+                CategoryStore.uncategorizedColorHex,
+                scheme: scheme
+            )
+        }
+        return CategoryVisuals.color(hex, scheme: scheme)
+    }
+
+    private func categoryColor(forID id: String) -> Color {
+        guard let usage = model.dayCategoryUsages.first(
+            where: { $0.id == id }
+        ) else {
+            return Theme.accent(scheme)
+        }
+        return CategoryVisuals.color(usage.colorHex, scheme: scheme)
+    }
+
+    private func categoryName(forID id: String) -> String {
+        model.dayCategoryUsages.first { $0.id == id }?.name ?? id
     }
 }
 
@@ -675,11 +867,7 @@ private struct DayChartModePicker: View {
                 .accessibilityAddTraits(
                     model.dayChartMode == mode ? [.isSelected] : []
                 )
-                .help(
-                    mode == .hourly
-                        ? "按小时查看屏幕使用时间"
-                        : "按网站/App 查看当日排行"
-                )
+                .help(helpText(for: mode))
             }
         }
         .padding(3)
@@ -691,6 +879,17 @@ private struct DayChartModePicker: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(Theme.border(scheme), lineWidth: 1)
         )
+    }
+
+    private func helpText(for mode: DayChartMode) -> String {
+        switch mode {
+        case .hourly:
+            return "按小时查看屏幕使用时间"
+        case .items:
+            return "按网站/App 查看当日排行"
+        case .category:
+            return "按自定义分类查看当日用时"
+        }
     }
 }
 
@@ -754,24 +953,6 @@ private struct SiteUsageCard: View {
                 Text(entries.isEmpty ? "暂无记录" : "共 \(entries.count) 项")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
-
-                SettingsLink {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, height: 26)
-                        .background(
-                            Theme.surface2(scheme),
-                            in: RoundedRectangle(
-                                cornerRadius: 7,
-                                style: .continuous
-                            )
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("网站与 App 映射设置")
-                .accessibilityLabel("网站与 App 映射设置")
             }
             .padding(.bottom, 7)
 

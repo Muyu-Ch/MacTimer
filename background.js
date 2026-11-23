@@ -1,12 +1,15 @@
 import {
   CURRENT_KEY,
   DAY_PREFIX,
+  EARLY_PREFIX,
   dayKey,
   dayStorageKey,
+  earlyStorageKey,
   formatBadge,
   MAX_TRUSTED_GAP_MS,
   siteFromUrl,
   splitSpan,
+  splitSpanByHour,
 } from './shared.js';
 
 const ALARM_NAME = 'mactimer-tick';
@@ -96,12 +99,18 @@ function previousLocalDay(ms) {
  * that limit by dropping the oldest days first; recent history is what the
  * dashboard needs most.
  */
-function trimFullDays(days) {
-  const keys = Object.keys(days).sort();
+function trimFullDays(days, earlyHours) {
+  const keys = [
+    ...new Set([...Object.keys(days), ...Object.keys(earlyHours)]),
+  ].sort();
   let estimated = 256;
   const sizes = new Map();
   for (const key of keys) {
-    const size = key.length + JSON.stringify(days[key]).length + 8;
+    const size =
+      key.length +
+      JSON.stringify(days[key] || {}).length +
+      JSON.stringify(earlyHours[key] || {}).length +
+      16;
     sizes.set(key, size);
     estimated += size;
   }
@@ -109,6 +118,7 @@ function trimFullDays(days) {
     if (estimated <= NATIVE_MAX_PAYLOAD) break;
     estimated -= sizes.get(key) || 0;
     delete days[key];
+    delete earlyHours[key];
   }
 }
 
@@ -119,6 +129,7 @@ async function nativeSyncNow(full, now) {
     reset: full,
     current: null,
     days: {},
+    earlyHours: {},
   };
 
   if (full) {
@@ -126,19 +137,29 @@ async function nativeSyncNow(full, now) {
     for (const [key, value] of Object.entries(stored)) {
       if (key.startsWith(DAY_PREFIX) && value && typeof value === 'object') {
         payload.days[key.slice(DAY_PREFIX.length)] = value;
+      } else if (
+        key.startsWith(EARLY_PREFIX) &&
+        value &&
+        typeof value === 'object'
+      ) {
+        payload.earlyHours[key.slice(EARLY_PREFIX.length)] = value;
       }
     }
     payload.current = stored[CURRENT_KEY] || null;
-    trimFullDays(payload.days);
+    trimFullDays(payload.days, payload.earlyHours);
   } else {
     const today = dayKey(now);
     const yesterday = dayKey(previousLocalDay(now));
     const todayKey = dayStorageKey(today);
     const yesterdayKey = dayStorageKey(yesterday);
+    const todayEarlyKey = earlyStorageKey(today);
+    const yesterdayEarlyKey = earlyStorageKey(yesterday);
     const stored = await chrome.storage.local.get({
       [CURRENT_KEY]: null,
       [todayKey]: {},
       [yesterdayKey]: {},
+      [todayEarlyKey]: {},
+      [yesterdayEarlyKey]: {},
     });
 
     const todayBucket = stored[todayKey];
@@ -148,6 +169,14 @@ async function nativeSyncNow(full, now) {
     const yesterdayBucket = stored[yesterdayKey];
     if (yesterdayBucket && typeof yesterdayBucket === 'object' && Object.keys(yesterdayBucket).length > 0) {
       payload.days[yesterday] = yesterdayBucket;
+    }
+    const todayEarly = stored[todayEarlyKey];
+    if (todayEarly && typeof todayEarly === 'object' && Object.keys(todayEarly).length > 0) {
+      payload.earlyHours[today] = todayEarly;
+    }
+    const yesterdayEarly = stored[yesterdayEarlyKey];
+    if (yesterdayEarly && typeof yesterdayEarly === 'object' && Object.keys(yesterdayEarly).length > 0) {
+      payload.earlyHours[yesterday] = yesterdayEarly;
     }
     payload.current = stored[CURRENT_KEY] || null;
   }
@@ -237,10 +266,17 @@ async function refresh() {
   if (canTrustPrevious) {
     const segments = splitSpan(previous.since, now);
     const bucketKeys = [...new Set(segments.map((seg) => dayStorageKey(seg.day)))];
+    const earlySegments = splitSpanByHour(previous.since, now).filter(
+      (seg) => seg.hour < 4 && seg.ms > 0,
+    );
+    const earlyKeys = [
+      ...new Set(earlySegments.map((seg) => earlyStorageKey(seg.day))),
+    ];
 
-    if (bucketKeys.length > 0) {
+    if (bucketKeys.length > 0 || earlyKeys.length > 0) {
       const defaults = {};
       for (const key of bucketKeys) defaults[key] = {};
+      for (const key of earlyKeys) defaults[key] = {};
       const storedBuckets = await chrome.storage.local.get(defaults);
 
       for (const key of bucketKeys) {
@@ -251,6 +287,27 @@ async function refresh() {
         const key = dayStorageKey(segment.day);
         const bucket = updates[key];
         bucket[previous.site] = (bucket[previous.site] || 0) + segment.ms;
+      }
+
+      for (const segment of earlySegments) {
+        const key = earlyStorageKey(segment.day);
+        let document = updates[key];
+        if (!document || typeof document !== 'object') {
+          const storedDocument = storedBuckets[key];
+          document =
+            storedDocument && typeof storedDocument === 'object'
+              ? { ...storedDocument }
+              : {};
+        }
+        const hourKey = String(segment.hour);
+        const hourBucket =
+          document[hourKey] && typeof document[hourKey] === 'object'
+            ? { ...document[hourKey] }
+            : {};
+        hourBucket[previous.site] =
+          (hourBucket[previous.site] || 0) + segment.ms;
+        document[hourKey] = hourBucket;
+        updates[key] = document;
       }
     }
   }

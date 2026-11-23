@@ -28,17 +28,23 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public var updatedAt: Int64
     public var current: CurrentSession?
     public var days: [String: [String: Int64]]
+    /// Calendar day -> clock hour ("0"..."3") -> site -> milliseconds.
+    /// Recorded by the extension so a custom day-start hour can move the
+    /// early-morning part of a calendar day onto the previous logical day.
+    public var earlyHours: [String: [String: [String: Int64]]]?
 
     public init(
         version: Int = 1,
         updatedAt: Int64 = 0,
         current: CurrentSession? = nil,
-        days: [String: [String: Int64]] = [:]
+        days: [String: [String: Int64]] = [:],
+        earlyHours: [String: [String: [String: Int64]]]? = nil
     ) {
         self.version = version
         self.updatedAt = updatedAt
         self.current = current
         self.days = days
+        self.earlyHours = earlyHours
     }
 
     public func entries(for day: String) -> [SiteEntry] {

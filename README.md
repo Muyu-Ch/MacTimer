@@ -2,7 +2,8 @@
 
 按网站（域名级别）统计每天在网页上的停留时间。Chrome 扩展负责计时，
 macOS App 负责查看，并可在获得系统授权后读取 Apple 屏幕使用时间，
-把 App 使用时长和对应网站合并到一起。数据只在本机流转，不联网、不上传。
+把 App 使用时长和对应网站合并到一起，再按自定义分类（学习、工作、
+娱乐等）汇总。数据只在本机流转，不联网、不上传。
 
 GitHub：[Muyu-Ch/MacTimer](https://github.com/Muyu-Ch/MacTimer)
 
@@ -10,8 +11,8 @@ GitHub：[Muyu-Ch/MacTimer](https://github.com/Muyu-Ch/MacTimer)
 
 普通用户不需要安装 Xcode，直接从 [GitHub Releases](https://github.com/Muyu-Ch/MacTimer/releases) 下载：
 
-- `MacTimer-1.3.0.dmg`
-- `MacTimer-Chrome-Extension-1.3.0.zip`
+- `MacTimer-1.4.0.dmg`
+- `MacTimer-Chrome-Extension-1.4.0.zip`
 
 ### 1. 安装 Mac App
 
@@ -37,7 +38,7 @@ GitHub：[Muyu-Ch/MacTimer](https://github.com/Muyu-Ch/MacTimer)
 
 扩展压缩包可以单独统计网页；但要把数据同步到 Mac App，需要安装本地桥。
 
-1. 解压 `MacTimer-Chrome-Extension-1.3.0.zip`，得到包含
+1. 解压 `MacTimer-Chrome-Extension-1.4.0.zip`，得到包含
    `manifest.json` 的文件夹。
 2. 重新打开 DMG（如果已经推出），双击其中的
    **Install Native Host.command**。
@@ -195,21 +196,24 @@ macos/scripts/uninstall.sh --purge    # 同时删除本地数据
 
 ## macOS App
 
-当前版本：**1.3.0**（build 8）。原生 SwiftUI 仪表盘。顶部有
+当前版本：**1.4.0**（build 9）。原生 SwiftUI 仪表盘。顶部有
 「日 / 周 / 月 / 年」切换，覆盖日历和统计。
 获得完全磁盘访问权限后，统计会把 Apple 屏幕使用时间里的 App 时长与
 Chrome 扩展记录的网站时长合并；未授权时只显示网页数据，App 顶部会有
 权限提示。
 
 - **日视图**：当天总使用、最常用网站/App、前一天总计；「当日使用」图
-  可以在**按小时**和**按网站/App**之间切换。按小时的分时图来自
-  Screen Time；如果当天没有分时数据，会自动显示网站/App 图。
-- **周视图**：周一至周日七列每日时长，周汇总、活跃日均、单日最高；
-  本周「网站与 App」排行。点击某天可进入当天明细。
-- **月视图**：月历中显示每天的总时长和深浅热力色；月度总使用、活跃
-  日均、单日最高；本月「网站与 App」排行。点击日期进入当天明细。
-- **年视图**：12 个月柱状图，年度总使用、活跃日均、单日最高；年度
-  「网站与 App」排行。点击月份进入月视图。
+  可以在**按小时**、**按网站/App** 和**按分类**之间切换。按小时的分时
+  图来自 Screen Time，柱子按分类颜色分段堆叠；如果当天没有分时数据，
+  会自动显示网站/App 图。按网站/App 的柱子同样使用所属分类的颜色。
+  图下方显示当天各分类的时长和占比。
+- **周视图**：周一至周日七列每日使用，柱子按分类分段堆叠；图下方显示
+  本周各分类的时长和占比。点击某天可进入当天明细。
+- **月视图**：月历中显示每天的总时长和深浅热力色；日历下方显示本月的
+  分类组成条、各分类时长和占比。点击日期进入当天明细。
+- **年视图**：12 个月柱状图，柱子按分类分段堆叠；图下方显示全年各分类
+  的时长和占比。点击月份进入月视图。
+- 没有归类的项目统一显示为 **「未分类」**，并使用灰色。
 
 通用交互：
 
@@ -217,12 +221,34 @@ Chrome 扩展记录的网站时长合并；未授权时只显示网页数据，A
 - 点击周视图的某天、月历中的日期或年视图中的月份，可以逐级下钻。
 - 排行在项目较多时显示前 8 个，其余合并为「其他 N 项」。
 - 周视图和月历都按周一到周日排列。
-- 顶部显示 Chrome 数据最后一次同步的时间；亮色/暗色跟随系统。
-- 「网站与 App」卡片右上角的滑杆按钮打开映射设置；也可以按 `⌘,`。
+- 顶部显示 Chrome 数据最后一次同步的时间。
+- 顶部同步按钮右侧有独立的设置齿轮；也可以按 `⌘,`。
+- 设置里可以把外观切换为 **跟随系统 / 明亮 / 黑暗**。
+- 设置里可以把 **每天的开始时间** 设为 `00:00` 到 `04:00` 之间的整点。
+  例如设为 `04:00` 后，每天 `00:00–04:00` 的使用会计入前一天。
+- 设置里可以新建分类、修改分类颜色，并把 App 或网站添加到分类。
+- 设置里的「关于 MacTimer」或应用菜单 **关于 MacTimer** 会打开信息页，
+  其中包含版本、开发者信息和支持方式。
 
 App 每 3 秒检查一次本地快照文件，每 60 秒刷新一次屏幕使用时间。
 网页同步由 Chrome 扩展主动发起；App 读取本机 Screen Time 数据库时
 只读、不联网。Chrome 关闭后，仍可查看最后一次同步的网页数据。
+
+### 每天的开始时间
+
+可以在设置中把一天的起点设为 `00:00`、`01:00`、`02:00`、`03:00`
+或 `04:00`。例如选择 `04:00` 后：
+
+- 每天 `00:00–04:00` 的网页和 App 使用会归入前一天；
+- 「今天」、日历选中状态、日/周/月/年统计都按这个起点计算；
+- 日视图分时图的横轴也随之改变，例如 `04:00` 会显示为
+  `04:00 → 次日 04:00` 的顺序；
+- Screen Time 的已保存小时数据会跟随设置重新归档；
+- Chrome 扩展会记录 `earlyHours`（`00:00–04:00` 的分时），App 用它
+  精确回移；扩展更新前已经汇总的历史网页数据无法反向拆分；
+- 扩展弹窗和工具栏徽标仍按自然日显示。
+
+修改后会立即重新计算并刷新视图，不需要重新读取 Screen Time 或重启 App。
 
 ## 屏幕使用时间与网站/App 合并
 
@@ -242,6 +268,13 @@ Apple 没有向第三方开放读取全部屏幕使用时间统计的公开 API�
 - 日视图的「按小时」图由 Screen Time 的 App 事件起止时间计算；没有
   完全磁盘访问权限、没有当天分时数据或日期超出保留范围时，会自动
   回退为「按网站/App」图。
+- Screen Time 只提供 Chrome 的每小时总时长，不提供 Chrome 内部逐域名
+  的分时数据。按小时图会按当天 Chrome 各分类的域名时长比例，把每小时的
+  Chrome 时间分配到对应分类；当天各分类的总时长仍与分类汇总一致。
+- 每次成功读取 Screen Time 后，App 会把日/小时数据合并保存到自己的
+  `~/Library/Application Support/MacTimer/screen-time-archive.json`。
+  因此 Apple 清掉 4 周前的明细后，MacTimer 仍能保留之前已经读过的历史。
+  归档从第一次成功读取开始，不能反向补录更早的日期。
 - Chrome、Chrome 网页 App 以及 MacTimer 自身不计入这里的普通 App 项，
   因为 Chrome 网站时间已经由扩展记录，否则会重复计算。
 - App 会额外计算 **Chrome（未记录）**：用 Screen Time 里 Chrome（含
@@ -282,12 +315,44 @@ Apple 没有向第三方开放读取全部屏幕使用时间统计的公开 API�
 
 自定义映射：
 
-1. 在「网站与 App」卡片右上角点滑杆按钮，或按 `⌘,` 打开设置。
+1. 点顶部同步按钮右侧的设置齿轮，或按 `⌘,` 打开设置。
 2. 输入域名（可以带 `https://`、`www.` 或路径，会自动归并到
    `bilibili.com` 这样的域名）。
 3. 选择一个本机 App，点「添加映射」。
 4. 自定义映射会立即生效并保存；删除后恢复同域名的内置映射。
    同一域名的自定义映射会覆盖内置映射。
+
+## 分类标签
+
+可以把 App 和网站归入自定义分类，例如「学习」「工作」「娱乐」。
+MacTimer 默认提供这三个分类，也可以新建、改名、改色或删除。
+
+使用方式：
+
+1. 打开 **设置 → 分类标签**。
+2. 点「新建分类」，输入名称并选择颜色。分类名称和颜色都可以随时修改。
+3. 在「给记录设置标签」中，从已经出现过的记录列表里找到网站或 App。
+   - 列表包含全部历史记录，不只限于今天或当前视图；
+   - 可以用搜索框按名称、域名或 bundle identifier 过滤；
+   - 已合并的网站会显示为对应的 App 目标，归类该 App 即可覆盖
+     合并后的网站时长；单独出现的域名会显示为网站目标。
+4. 点击该行右侧的标签，在弹出的列表中选择一个已经建好的分类，规则会
+   立即生效。再次点击标签可以选择其他分类或「清除分类」。
+
+规则说明：
+
+- **App 规则优先于网站规则**。例如把哔哩哔哩 App 归入「娱乐」后，
+  即使 `bilibili.com` 被单独的网站规则归入别的分类，合并后的
+  「哔哩哔哩 + bilibili.com」也会使用 App 的分类。
+- 网站与 App 合并后的项目按合并后的总时长统计，不会被拆开。
+- 没有匹配到任何规则的 App 或网站归入 **「未分类」**，固定使用灰色。
+- 同一个 App 或域名重复添加规则时，新规则会替换旧规则。
+- 删除分类会同时删除关联规则，这些项目会回到「未分类」。
+- 分类规则和颜色保存在本机 `UserDefaults` 中，不写入 Screen Time
+  数据库，也不会上传。
+- 日、周、月、年视图的柱状图/日历会随分类、规则和颜色变化立即更新。
+- 归类列表只包含已经产生过记录的项目；如果某个网站或 App 还没有
+  出现在任何记录里，需要先使用一次，等数据刷新后再来归类。
 
 ## 数据与同步
 
@@ -297,6 +362,7 @@ Apple 没有向第三方开放读取全部屏幕使用时间统计的公开 API�
 | --- | --- |
 | `current` | 当前正在计时的会话：`{ site, since }` |
 | `day:YYYY-MM-DD` | 某个本地日期下各网站的毫秒数，如 `{ "youtube.com": 7200000 }` |
+| `early:YYYY-MM-DD` | 该本地日期 `00:00–04:00` 的分时数据：`{ "0": { "youtube.com": 120000 }, ... }`，用于 App 的「每天的开始时间」 |
 
 扩展通过本机 native messaging 桥，把数据镜像到：
 
@@ -313,6 +379,12 @@ Apple 没有向第三方开放读取全部屏幕使用时间统计的公开 API�
   "current": { "site": "youtube.com", "since": 1795364600000 },
   "days": {
     "2026-11-23": { "youtube.com": 7200000 }
+  },
+  "earlyHours": {
+    "2026-11-23": {
+      "0": { "youtube.com": 120000 },
+      "1": { "youtube.com": 60000 }
+    }
   }
 }
 ```
@@ -321,8 +393,11 @@ Apple 没有向第三方开放读取全部屏幕使用时间统计的公开 API�
   时发送完整快照。
 - native messaging 单条消息上限约 1 MB。完整快照会控制在约 850 KB 以内，
   超出时优先保留最近日期的数据；扩展自身仍保留完整历史。
+- `earlyHours` 是每个本地日期 `00:00–04:00` 的分时数据，只用于「每天的开始时间」。
+  App 用它把凌晨时段移到前一天；较早的镜像没有这个字段时，对应日期无法精确回移。
 - 这个 JSON 只包含 **Chrome 网页数据**。App 使用时长不会写进
   `usage.json`，而是由 App 在每次刷新时从本机屏幕使用时间数据库读取，
+  并归档到 `~/Library/Application Support/MacTimer/screen-time-archive.json`；
   因此不会改变扩展和本地桥的格式。
 - 所有数据只在本机文件中，不经过网络。
 
@@ -336,6 +411,9 @@ npm test
 
 macOS 测试覆盖日期周期（周一起始、月网格、年键）、跨天聚合、
 时长格式、本地存储、域名归一化、App/网站合并、内置/自定义映射、
+分类规则的新增/修改/删除/持久化与优先级、按分类聚合未分类时长、
+从历史记录生成网站/App 归类目标、日图表的三种模式、每天开始时间的
+逻辑日计算与 Chrome/Screen Time 回移、
 Chrome 未记录时间的三分钟阈值，以及用临时 SQLite 数据库构造的
 屏幕使用时间解析（跨午夜/跨小时拆分、`/app/usage` 与
 `/app/inFocus` 流选择、格式错误处理）。真实系统数据库需要完全
@@ -366,12 +444,13 @@ tools/             图标生成
 macos/
   Package.swift
   Sources/MacTimerCore     数据模型、日期/周期、屏幕使用时间读取、域名与 App 合并
-  Sources/MacTimerUI       SwiftUI 界面、日/周/月/年视图、设置、映射和权限状态
+  Sources/MacTimerUI       SwiftUI 界面、日/周/月/年视图、设置、映射、分类和权限状态
   Sources/MacTimer         App 入口
   Sources/MacTimerHost     native messaging 本地桥
   Sources/MacTimerPreview  截图/预览工具
   Tests/                    Swift 核心与界面测试
   Resources/                Info.plist、AppIcon.icns
+  Resources/Support/        关于页的收款码图片
   scripts/                  build / install / uninstall / test / package-release
                             / Install Native Host.command
 .github/
@@ -401,19 +480,19 @@ build/                      构建产物（MacTimer.app、MacTimerHost）
 4. 提交并打 tag：
    ```bash
    git add .
-   git commit -m "Release v1.3.0"
-   git tag -a v1.3.0 -m "MacTimer 1.3.0"
+   git commit -m "Release v1.4.0"
+   git tag -a v1.4.0 -m "MacTimer 1.4.0"
    git push origin main
-   git push origin v1.3.0
+   git push origin v1.4.0
    ```
 5. GitHub Actions 会由 `.github/workflows/release.yml` 在 `v*` tag 上
    自动构建并创建 Release。也可以手动发布：
    ```bash
-   gh release create v1.3.0 \
-     dist/MacTimer-1.3.0.dmg \
-     dist/MacTimer-Chrome-Extension-1.3.0.zip \
+   gh release create v1.4.0 \
+     dist/MacTimer-1.4.0.dmg \
+     dist/MacTimer-Chrome-Extension-1.4.0.zip \
      dist/SHA256SUMS.txt \
-     --title "MacTimer 1.3.0" \
+     --title "MacTimer 1.4.0" \
      --notes-file .github/release-notes.md
    ```
 
@@ -443,6 +522,8 @@ macos/scripts/test.sh
   由使用者自行承担。
 - 第三方 App 名称、图标和 bundle identifier 属于各自所有者；内置映射
   仅作为示例，不代表与这些产品存在合作或背书。
+- `macos/Resources/Support/` 中的微信/支付宝收款码图片仅用于支持本项目
+  开发者，不属于 MIT 许可的代码范围，请勿另作他用。
 - 本项目使用 MIT License，详见 `LICENSE`。
 
 ## 已知边界
@@ -456,11 +537,16 @@ macos/scripts/test.sh
   这类共享域名下的服务无法单独映射。
 - 网页数据依赖 Chrome 和扩展运行；Chrome 关闭后只显示最后一次同步的镜像。
   App 数据不依赖 Chrome，但需要完全磁盘访问权限。
+- 「每天的开始时间」会作用于 Mac App 的日/周/月/年统计。扩展弹窗和工具栏
+  徽标仍然按自然日显示。Chrome 的分日数据只有在扩展记录 `earlyHours`
+  之后才能精确回移；更新前已经汇总的网页历史无法拆分。Screen Time 历史
+  因为保存了小时数据，修改开始时间后会重新归入新的日期。
 - Screen Time 的本地数据库是 Apple 未公开的结构，macOS 版本更新后可能
   改变字段或流名称；App 会在读取失败时显示提示，而不是静默显示空数据。
   `knowledgeC.db` 的 App 明细和分时事件通常只覆盖约最近 4 周，年度
   App 统计和日视图的分时图会因此不完整；更早日期会回退为网站/App 图。
-  这是系统数据库本身的保留限制。
+  这是系统数据库本身的保留限制。MacTimer 会把已读取的数据归档，因此
+  从首次成功读取之后不会再丢历史；归档前已经消失的日期无法恢复。
 - App 的「屏幕使用」总计是网页时间与 Screen Time App 时间的本地合并，
   不等同于 Apple 屏幕使用时间界面中的官方总计（系统可能有自己的去重、
   设备同步和四舍五入规则）。
